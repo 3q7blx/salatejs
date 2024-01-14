@@ -1,90 +1,206 @@
-import React, { useState, useMemo, useCallback } from "react";
-import { createEditor, Transforms, Editor, Element } from "slate";
+// import React, { useState, useMemo, useCallback } from "react";
+// import { createEditor, Transforms, Editor, Element } from "slate";
+// import { Slate, Editable, withReact } from "slate-react";
+
+import React, { useMemo, useCallback, useState } from "react";
+import { createEditor, Transforms } from "slate";
 import { Slate, Editable, withReact } from "slate-react";
+import { withHistory } from "slate-history";
+import { Paragraph, Link, Star } from "./plugins/paragraph";
+import { Card } from "./plugins/card";
+import { Image } from "./plugins/image";
+import { Table, TableRow, TableCell, TableCellMerged } from "./plugins/table";
+import { Divider } from "./plugins/divider";
+import { Hr } from "./plugins/hr";
+import { Code, CodeLine } from "./plugins/code";
+import { Video } from "./plugins/video";
+import { Menu } from "./menu";
+import _ from "lodash";
+import { Affix } from "antd";
 
-function App() {
-  // Create a Slate editor object that won't change across renders.
-  // editor 即该编辑器的对象实例
-  // const editor = useMemo(() => withReact(createEditor()), []);
-  const [editor] = useState(() => withReact(createEditor()));
+// import './index.css';
 
-  // 初始化 value ，即编辑器的内容。其数据格式类似于 vnode ，下文会详细结实。
-  const initialValue = [
-    {
-      type: "paragraph",
-      children: [{ text: "我是一行文字" }],
-    },
-  ];
-  const [value, setValue] = useState(initialValue);
+const defaultPlugins = [
+  // 段落
+  Paragraph,
+  Link,
+  Star,
+  // 卡片
+  Card,
+  // 图片
+  Image,
+  // 表格
+  Table,
+  TableRow,
+  TableCell,
+  TableCellMerged,
+  // 代码块
+  Code,
+  CodeLine,
+  // 分割线
+  Divider,
+  Hr,
+  // 视频
+  Video,
+];
 
-  // Define a React component renderer for our code blocks.
-  const CodeElement = (props) => {
-    return (
-      <pre {...props.attributes}>
-        <code>{props.children}</code>
-      </pre>
-    );
+const withCommon = (editor) => {
+  editor.readOnly = false;
+  editor.param = {};
+  const { onChange } = editor;
+  const _onChange = _.throttle(onChange, 16);
+  editor.onChange = () => {
+    _onChange();
   };
+  return editor;
+};
 
-  const DefaultElement = (props) => {
-    return <p {...props.attributes}>{props.children}</p>;
-  };
+const SEditor = (props) => {
+  const { value, onChange, plugins, param } = props;
+  const readOnly = !!props.readOnly;
 
-  // Define a rendering function based on the element passed to `props`. We use
-  // `useCallback` here to memoize the function for subsequent renders.
+  const newPlugins = [...defaultPlugins, ...plugins];
+
+  const editor = useMemo(() => {
+    let reditor = withCommon(withHistory(withReact(createEditor())));
+
+    // 排在前边的插件，在wrap的时候放在最外层，保证优先执行
+    for (var i = newPlugins.length - 1; i >= 0; i--) {
+      if (newPlugins[i].Plugin) {
+        reditor = newPlugins[i].Plugin(reditor);
+      }
+    }
+
+    return reditor;
+  }, []);
+
+  editor.readOnly = readOnly;
+  editor.param = param;
+
   const renderElement = useCallback((props) => {
-    switch (props.element.type) {
-      case "code":
-        return <CodeElement {...props} />;
-      default:
-        return <DefaultElement {...props} />;
+    const { attributes, children, element } = props;
+
+    if (!element.type) {
+      element.type = "paragraph";
+    }
+
+    for (var i = 0; i < newPlugins.length; i++) {
+      const Ele = newPlugins[i].Element;
+      if (newPlugins[i].type === element.type) {
+        if (newPlugins[i].IsBlock) {
+          return (
+            <Menu
+              element={element}
+              plugins={newPlugins}
+              editMenu={newPlugins[i].EditMenu}
+            >
+              <Ele
+                attributes={attributes}
+                children={children}
+                element={element}
+              />
+            </Menu>
+          );
+        } else {
+          return (
+            <Ele
+              attributes={attributes}
+              children={children}
+              element={element}
+            />
+          );
+        }
+      }
+    }
+
+    return <span {...attributes}>{children}</span>;
+  }, []);
+
+  const renderElementReadOnly = useCallback((props) => {
+    const { attributes, children, element } = props;
+
+    if (!element.type) {
+      element.type = "paragraph";
+    }
+
+    for (var i = 0; i < newPlugins.length; i++) {
+      if (newPlugins[i].type === element.type) {
+        return newPlugins[i].Element({ attributes, children, element });
+      }
+    }
+
+    return <span {...attributes}>{children}</span>;
+  }, []);
+
+  const renderLeaf = useCallback(({ attributes, children, leaf }) => {
+    for (var i = 0; i < newPlugins.length; i++) {
+      if (newPlugins[i].Leaf) {
+        children = newPlugins[i].Leaf({ attributes, children, leaf });
+      }
+    }
+
+    return <span {...attributes}>{children}</span>;
+  }, []);
+
+  const Toolbar = (props) => {
+    const tools = [];
+    for (var i = 0; i < newPlugins.length; i++) {
+      if (newPlugins[i].LeafBar) {
+        tools.push(
+          <span key={newPlugins[i].type}>{newPlugins[i].LeafBar(props)}</span>
+        );
+      }
+    }
+
+    return <div>{tools}</div>;
+  };
+
+  const onKeyDown = useCallback((event) => {
+    // 监听tab的快捷方式
+    if (event.key == "Tab" && editor.onTabDown && editor.onTabDown()) {
+      event.preventDefault();
     }
   }, []);
 
+  const Decorate = useCallback(([node, path]) => {
+    for (var i = 0; i < newPlugins.length; i++) {
+      if (newPlugins[i].Decorate && newPlugins[i].type === node.type) {
+        return newPlugins[i].Decorate(editor, [node, path]);
+      }
+    }
+
+    return [];
+  }, []);
   return (
-    <div style={{ border: "1px solid #ccc", padding: "10px" }}>
-      <Slate
-        editor={editor}
-        initialValue={initialValue}
-        onChange={(newValue) => setValue(newValue)}
-      >
-        <Editable
-          renderElement={renderElement}
-          onKeyDown={(event) => {
-            if (!event.ctrlKey) {
-              return;
-            }
-
-            switch (event.key) {
-              // When "`" is pressed, keep our existing code block logic.
-              case "`": {
-                event.preventDefault();
-                const [match] = Editor.nodes(editor, {
-                  match: (n) => n.type === "code",
-                });
-                Transforms.setNodes(
-                  editor,
-                  { type: match ? "paragraph" : "code" },
-                  { match: (n) => Editor.isBlock(editor, n) }
-                );
-                break;
-              }
-
-              // When "B" is pressed, bold the text in the selection.
-              case "b": {
-                event.preventDefault();
-                Editor.addMark(editor, "bold", true);
-                break;
-              }
-              default: {
-                //
-              }
-            }
-          }}
-        />
-      </Slate>
-    </div>
+    <Slate editor={editor} value={value} onChange={onChange}>
+      {readOnly ? null : (
+        <>
+          <Affix offsetTop={0}>
+            <div style={{ padding: "10px", background: "#bae7ff" }}>
+              <Toolbar />
+            </div>
+          </Affix>
+          <br />
+        </>
+      )}
+      <Editable
+        style={{
+          fontSize: "16px",
+          fontFamily: `-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial,
+                    'Noto Sans', sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol',
+                    'Noto Color Emoji'`,
+        }}
+        renderElement={readOnly ? renderElementReadOnly : renderElement}
+        renderLeaf={renderLeaf}
+        onKeyDown={onKeyDown}
+        decorate={Decorate}
+        spellCheck={false}
+        readOnly={readOnly}
+        scrollSelectionIntoView={(editor, domRange) => {}}
+        placeholder="输入文本"
+      />
+    </Slate>
   );
-}
+};
 
-export default App;
+export default SEditor;
