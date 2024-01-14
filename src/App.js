@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 
 import Editor from "./editor";
+import AppStyle from "./App.module.css";
 
 export default function App() {
   const config = [
@@ -18,12 +19,14 @@ export default function App() {
   console.log(value);
 
   return (
-    <Editor
-      value={value}
-      plugins={[]}
-      readOnly={false}
-      param={{}}
-      onChange={(v) => setValue(v)}
-    />
+    <div className={AppStyle.editor}>
+      <Editor
+        value={value}
+        plugins={[]}
+        readOnly={false}
+        param={{}}
+        onChange={(v) => setValue(v)}
+      />
+    </div>
   );
 }
